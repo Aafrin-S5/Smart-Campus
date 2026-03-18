@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Smart Campus Pro</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <style>
+    body { font-family: Arial; background: #eef2f7; margin: 0; }
+    .container { padding: 20px; }
+    .card {
+      background: white;
+      padding: 20px;
+      margin: 15px 0;
+      border-radius: 12px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+    }
+    input { padding: 10px; margin: 5px 0; width: 100%; }
+    button {
+      padding: 10px;
+      border: none;
+      background: #4CAF50;
+      color: white;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+  </style>
+
+  <!-- QR LIBRARY -->
+  <script src="https://unpkg.com/html5-qrcode"></script>
+</head>
+
+<body>
+
+<div class="container">
+  <h1>Smart Campus Pro</h1>
+
+  <!-- LOGIN -->
+  <div id="authBox" class="card">
+    <input id="emailInput" placeholder="Email">
+    <input id="passwordInput" type="password" placeholder="Password">
+    <button onclick="login()">Login</button>
+    <button onclick="signup()">Signup</button>
+  </div>
+
+  <!-- DASHBOARD -->
+  <div id="dashboard" style="display:none;">
+
+    <!-- ATTENDANCE -->
+    <div class="card">
+      <h3>QR + GPS Attendance</h3>
+      <button onclick="startScanner()">Scan QR & Mark Attendance</button>
+      <div id="reader" style="width:300px;"></div>
+    </div>
+
+    <!-- NOTICES -->
+    <div class="card">
+      <h3>Notices</h3>
+      <input id="noticeInput" placeholder="Write notice">
+      <button onclick="addNotice()">Upload</button>
+      <ul id="noticeList"></ul>
+    </div>
+
+    <!-- ASSIGNMENTS -->
+    <div class="card">
+      <h3>Assignments</h3>
+      <input id="assignmentInput" placeholder="Add assignment">
+      <button onclick="addAssignment()">Upload</button>
+      <ul id="assignmentList"></ul>
+    </div>
+
+    <!-- ADMIN -->
+    <div class="card" id="adminPanel" style="display:none;">
+      <h3>Admin Panel</h3>
+      <button onclick="downloadCSV()">Download Excel</button>
+      <ul id="attendanceList"></ul>
+    </div>
+
+    <button onclick="logout()">Logout</button>
+  </div>
+</div>
+
+<script type="module">
+
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-app.js";
+import {
+  getAuth, createUserWithEmailAndPassword,
+  signInWithEmailAndPassword, onAuthStateChanged, signOut
+} from "https://www.gstatic.com/firebasejs/12.10.0/firebase-auth.js";
+import {
+  getFirestore, collection, addDoc, onSnapshot, getDocs
+} from "https://www.gstatic.com/firebasejs/12.10.0/firebase-firestore.js";
+
+// Firebase config
+const firebaseConfig = {
+  apiKey: "AIzaSyC6tXiwvY68BKYxP6Nw-vgpGBoZKF7c5Fg",
+  authDomain: "smart-campus-863c3.firebaseapp.com",
+  projectId: "smart-campus-863c3",
+  storageBucket: "smart-campus-863c3.firebasestorage.app",
+  messagingSenderId: "760023984428",
+  appId: "1:760023984428:web:5e2bb4b2b503bf4237e489"
+};
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+const adminEmail = "admin@gmail.com";
+
+// AUTH
+window.signup = async () => {
+  await createUserWithEmailAndPassword(auth, emailInput.value, passwordInput.value);
+  alert("Signup success");
+};
+
+window.login = async () => {
+  await signInWithEmailAndPassword(auth, emailInput.value, passwordInput.value);
+};
+
+window.logout = () => signOut(auth);
+
+onAuthStateChanged(auth, user => {
+  if (user) {
+    authBox.style.display = "none";
+    dashboard.style.display = "block";
+
+    loadNotices();
+    loadAssignments();
+
+    if (user.email === adminEmail) {
+      adminPanel.style.display = "block";
+      loadAttendance();
+    }
+  }
+});
+
+// ================= QR + GPS =================
+
+const collegeLat = 10.3419;
+const collegeLng = 78.8489;
+const allowedRadius = 500;
+
+window.startScanner = () => {
+  const qr = new Html5Qrcode("reader");
+
+  qr.start(
+    { facingMode: "environment" },
+    { fps: 10, qrbox: 250 },
+    async (decodedText) => {
+
+      await qr.stop();
+
+      // 🔥 FIXED QR CHECK
+      const qrValue = decodedText.trim().toUpperCase();
+
+      if (qrValue.includes("SMART123")) {
+        checkGPS();
+      } else {
+        alert("❌ Invalid QR");
+      }
+
+    }
+  );
+};
+
+function checkGPS() {
+  navigator.geolocation.getCurrentPosition(saveAttendance, () => {
+    alert("Allow location");
+  });
+}
+
+async function saveAttendance(pos) {
+  const lat = pos.coords.latitude;
+  const lng = pos.coords.longitude;
+
+  const distance = getDistance(lat, lng, collegeLat, collegeLng);
+
+  if (distance <= allowedRadius) {
+    await addDoc(collection(db, "attendance"), {
+      user: auth.currentUser.email,
+      time: new Date()
+    });
+
+    alert("✅ Attendance Marked");
+  } else {
+    alert("❌ Outside campus");
+  }
+}
+
+function getDistance(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const dLat = (lat2 - lat1) * Math.PI/180;
+  const dLon = (lon2 - lon1) * Math.PI/180;
+
+  const a =
+    Math.sin(dLat/2)**2 +
+    Math.cos(lat1*Math.PI/180) *
+    Math.cos(lat2*Math.PI/180) *
+    Math.sin(dLon/2)**2;
+
+  return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)));
+}
+
+// ================= NOTICES =================
+
+window.addNotice = async () => {
+  await addDoc(collection(db, "notices"), { text: noticeInput.value });
+  noticeInput.value = "";
+};
+
+function loadNotices() {
+  onSnapshot(collection(db, "notices"), snap => {
+    noticeList.innerHTML = "";
+    snap.forEach(doc => {
+      const li = document.createElement("li");
+      li.innerText = doc.data().text;
+      noticeList.appendChild(li);
+    });
+  });
+}
+
+// ================= ASSIGNMENTS =================
+
+window.addAssignment = async () => {
+  await addDoc(collection(db, "assignments"), { text: assignmentInput.value });
+  assignmentInput.value = "";
+};
+
+function loadAssignments() {
+  onSnapshot(collection(db, "assignments"), snap => {
+    assignmentList.innerHTML = "";
+    snap.forEach(doc => {
+      const li = document.createElement("li");
+      li.innerText = doc.data().text;
+      assignmentList.appendChild(li);
+    });
+  });
+}
+
+// ================= ADMIN =================
+
+function loadAttendance() {
+  onSnapshot(collection(db, "attendance"), snap => {
+    attendanceList.innerHTML = "";
+    snap.forEach(doc => {
+      const d = doc.data();
+      const li = document.createElement("li");
+      li.innerText = `${d.user} - ${new Date(d.time.seconds * 1000).toLocaleString()}`;
+      attendanceList.appendChild(li);
+    });
+  });
+}
+
+window.downloadCSV = async () => {
+  let csv = "User,Time\n";
+  const snap = await getDocs(collection(db, "attendance"));
+
+  snap.forEach(doc => {
+    const d = doc.data();
+    const time = new Date(d.time.seconds * 1000).toLocaleString();
+    csv += `${d.user},${time}\n`;
+  });
+
+  const blob = new Blob([csv], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "attendance.csv";
+  a.click();
+};
+
+</script>
+
+</body>
+</html>
